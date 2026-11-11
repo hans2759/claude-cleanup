@@ -50,7 +50,7 @@ APP = pathlib.Path("/Applications/Claude.app")
 def read_json(path: pathlib.Path, default: object | None = None) -> object:
     if not path.exists() and default is not None:
         return default
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 def write_json(path: pathlib.Path, data: object) -> None:
@@ -235,6 +235,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="安全审计和清理 Claude 本机状态")
     parser.add_argument("--audit", action="store_true", help="只读审计")
     args = parser.parse_args(argv)
+    if sys.platform != "darwin":
+        print("此入口仅支持 macOS；Windows 请使用 scripts/claude_cleanup_windows.ps1 或 claude_cleanup_windows.py。", file=sys.stderr)
+        return 2
     home, app = pathlib.Path.home(), APP
     claude, identity, settings = home / ".claude", home / ".claude.json", home / ".claude/settings.json"
     if running_under_claude() and not args.audit:
@@ -250,7 +253,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     disabled = [key for key in TELEMETRY_KEYS if str(env.get(key, "")).lower() in {"1", "true", "yes", "on"}]
     print("Claude Cleanup 会自动清理明确可再生的缓存/日志；风险操作仍由你选择。")
-    print("输入最终 CONFIRM 前不会写盘；所有移除只进入废纸篓。\n\n只读审计：")
+    print("输入最终 CONFIRM 前不会写盘；文件移除只进入废纸篓。\n\n只读审计：")
     print(f"- ~/.claude：{'存在' if claude.is_dir() else '不存在'}；~/.claude.json：{'存在' if identity.is_file() else '不存在'}")
     print(f"- 可自动清理缓存/日志：{len(safe)} 项；Claude Desktop 持久数据：{len(desktop)} 项")
     print(f"- Claude.app：{'存在' if app.exists() else '不存在'}；相关进程：{len(processes)} 个")
@@ -289,8 +292,12 @@ def main(argv: list[str] | None = None) -> int:
         for target in targets:
             print(f"   - {target}")
         print(f"3. 身份轮换：{'是' if rotate else '否'}；删除钥匙串：{'是' if keychain else '否'}；精简模式：{simple_mode}；修改时区：{'是' if set_timezone else '否'}")
-        print("绝不清理 sessions、projects、history、skills、plugins、hooks、commands、agents、MCP、设置文件或任何项目/Git/Codex 数据。")
-        print("所有移除只进废纸篓；遥测键逐值保持不变。")
+        print("绝不移走 Claude Code 的 sessions、projects、history、skills、plugins、hooks、commands、agents、MCP、设置文件或任何项目/Git/Codex 数据。")
+        if desktop_mode:
+            print("注意：Desktop 数据目录整体移入废纸篓，包含其中的 MCP 配置、扩展及本地持久数据。")
+        if keychain:
+            print("注意：钥匙串条目直接删除，不在文件备份内；恢复登录需重新认证。")
+        print("文件移除只进废纸篓；遥测键逐值保持不变。")
         if input("完全理解后输入 CONFIRM 开始；其他输入取消：").strip() != "CONFIRM":
             print("已取消，没有修改任何内容。")
             return 1

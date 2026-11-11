@@ -17,6 +17,11 @@ SPEC.loader.exec_module(cleanup)
 
 
 class CleanupTests(unittest.TestCase):
+    def setUp(self):
+        platform = mock.patch.object(sys, "platform", "darwin")
+        platform.start()
+        self.addCleanup(platform.stop)
+
     def home(self) -> pathlib.Path:
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)

@@ -1,39 +1,79 @@
 # claude-cleanup
 
-Claude 本机清理 skill：在 macOS 上安全审计、完整备份、清理或重置 Claude Code 与 Claude Desktop 的本机状态。
+Claude 本机清理 skill，支持 **macOS 与原生 Windows**：审计、备份、清理 Claude Code / Claude Desktop 的缓存、日志及可选登录状态。需要 **Python 3.10+**，无第三方 Python 依赖。
 
-适用于清理可再生缓存和日志、轮换本地 ID、重置桌面端登录态、移除应用、启用最小提示词模式或修改台北时区。
+## 快速开始
 
-## 安全设计
+在本仓库目录执行。先只读审计，再根据清单选择是否运行交互清理。
 
-- 用随附脚本执行，不临时拼接 `rm`；脚本采用窄白名单，目标与保护路径重叠立即停止
-- 第一个写操作是完整复制并校验 `~/.claude`，同时备份 `~/.claude.json`
-- 所有移除只进入时间戳废纸篓目录，不永久删除、不清空废纸篓
-- 写盘前显示展开后的完整清单，用户输入一次 `CONFIRM` 后才开始；失败即停止
-- 遥测设置（`DISABLE_TELEMETRY` 等三键）逐值保留，原样不动
+### Windows
 
-## 用法
+支持 Windows 10/11、PowerShell 5.1/7。入口自动查找 `py` 或 `python`，无需管理员权限。
 
-先跑只读审计：
+```powershell
+# 只读审计
+& .\scripts\claude_cleanup_windows.ps1 -Audit
 
+# 交互清理：选择可选操作，检查完整路径，最后输入 CONFIRM
+& .\scripts\claude_cleanup_windows.ps1
 ```
+
+如果执行策略阻止 `.ps1`，可直接运行 Python 入口，无需修改系统策略：
+
+```powershell
+py -3 -B -X utf8 .\scripts\claude_cleanup_windows.py --audit
+py -3 -B -X utf8 .\scripts\claude_cleanup_windows.py
+```
+
+### macOS
+
+```bash
 python3 scripts/claude_cleanup.py --audit
-```
-
-正式执行要在 Codex 或普通终端里运行：
-
-```
 python3 scripts/claude_cleanup.py
 ```
 
-注意：正在运行的 Claude Code 不能改自己的 `~/.claude`，由它启动时只允许 `--audit` 只读审计。
+实际清理需要用户可交互的终端。正在运行的 Claude Code 只能启动只读审计，不能修改自己的配置；改用独立终端或 Codex 的终端执行。脚本不提供跳过确认参数，不自动结束 Claude 进程。
 
-自动安全清理的范围是可再生缓存和日志（如 `~/.claude/cache`、`telemetry`、`usage-data`、`~/Library/Logs/Claude`）。身份轮换、钥匙串、桌面端登录态、应用移除、精简模式和时区属于风险操作，由用户在运行时逐项选择。
+## 平台范围
 
-绝不动：`~/.claude/projects`、`sessions`、`history.jsonl`、`skills`、`plugins`、`hooks`、`commands`、`agents`、`mcp-servers`、`CLAUDE.md`、`settings.json` 等保护路径，以及任何项目目录和 Git 仓库。
+| 功能 | Windows | macOS |
+| --- | --- | --- |
+| Code 缓存、用量缓存和日志 | 支持 | 支持 |
+| Desktop 缓存和日志 | 标准目录及已知 MSIX 目录中的白名单子项 | 脚本中的 Library 白名单 |
+| 本地 ID 轮换 | 可选，备份后同步已知内部备份 | 同左 |
+| CLI 登录凭据 | 可选移走 `.claude\.credentials.json` | 可选删除指定钥匙串条目 |
+| Desktop 登录态重置 | 只移动白名单存储，保留 MCP 配置和扩展 | 整体移动已知数据目录，包含其中的 MCP 配置和扩展 |
+| 精简模式 | 可选设置/移除 `CLAUDE_CODE_SIMPLE` | 同左 |
+| 应用移除、台北时区 | 不处理 | 可选 |
+| 文件移除去向 | `ClaudeCleanupTrash` 可恢复隔离目录 | `~/.Trash` 批次目录 |
+
+Windows 以 `%USERPROFILE%\.claude`、`%APPDATA%\Claude` 为主要数据目录，并识别现存 `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude`。不处理整个 AppData、应用安装目录、注册表、Windows 凭据管理器或 WSL。自定义配置/凭据目录只允许默认路径审计，禁止清理；AppData 位于用户目录外时停止。
+
+完整白名单、限制和恢复步骤见 [Windows 说明](references/windows.md) 与 [macOS 说明](references/macos.md)。供 agent 使用的入口说明见 [SKILL.md](SKILL.md)。
+
+## 安全与恢复
+
+- 清理前先完整备份现存 `.claude` 和 `.claude.json`，保存到用户目录的 `ClaudeBackups`。Windows 逐文件 SHA-256 校验；macOS 保留原有数量/大小校验。
+- Windows 拒绝符号链接、junction、其他 reparse point，以及位于或包含 Git 仓库的清理目标。进程查询失败或检测到 Claude 重新启动时停止，不把查询失败当作“进程已退出”。
+- 所有**文件移除**都可恢复，不永久删除。Windows 隔离目录是 `%USERPROFILE%\ClaudeCleanupTrash`，不是系统回收站；备份内的 `moves.json` 记录源路径、隔离路径和完成状态。钥匙串删除、时区修改不属于文件移除。
+- Code 会话、项目、历史、skills、plugins、hooks、commands、agents、MCP 等保护数据不移走。仅在明确选择时修改精简模式键或已知身份文件；其他设置和遥测三键逐值保留。
+- 失败立即停止，可能保留 `.partial` 备份或已移动项。恢复前退出 Claude，逐项核对路径；原路径已有新数据时不要覆盖。备份和隔离可能含凭据、会话，不上传、不自动清空。
+- 完整备份与保留隔离文件可能增加磁盘占用，不能当作立即释放空间的工具。
+
+## 验证
+
+```powershell
+python -B -X utf8 -m unittest discover -s tests -v
+```
+
+测试在临时目录构造数据，不清理真实用户配置。覆盖备份、取消、保护数据、遥测保留、Windows 登录态与 MSIX 路径、同大小内容损坏、进程检查、部分失败，以及 Windows junction 越界防护。macOS 交互与系统命令使用模拟验证，仍需在 macOS 上做原生验证。
 
 ## 边界
 
-本 skill 用于本机隐私与排障，不用于规避封禁、支付检查、设备或 IP 信誉、浏览器指纹或任何平台风控；清理不承诺防封。
+用于本机隐私与排障，不删除云端聊天、不保证撤销所有登录方式或远程令牌，不用于规避封禁、支付检查、设备/IP 信誉或其他平台风控。
 
 配套：[Claude 环境检测](https://www.agenai.cc/claude-check) 查网络环境，本 skill 管本机状态，两者都不查账号封没封。
+
+## License
+
+本项目采用 [MIT License](LICENSE)。
